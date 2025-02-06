@@ -71,6 +71,7 @@ func main() {
 	commands.Register("reset", handleReset)
 	commands.Register("users", handleUsers)
 	commands.Register("agg", handleAgg)
+	commands.Register("addfeed", handleAddFeed)
 
 	// Use os.Args to get the command-line arguments passed in by the user.
 	// The first argument is the name of the program, so we skip it.
@@ -217,5 +218,35 @@ func handleAgg(_ *State, cmd Command) error {
 
 	// Print the entire feed to the console.
 	fmt.Printf("Feed: %+v\n", feed)
+	return nil
+}
+
+func handleAddFeed(s *State, cmd Command) error {
+	if len(cmd.Arguments) != 2 {
+		return fmt.Errorf(`AddFeed requires name and url arguments. example addfeed "<name>" "<url>"`)
+	}
+
+	feedName := cmd.Arguments[0]
+	feedURL := cmd.Arguments[1]
+
+	// Get current user
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	user, err := s.db.GetUser(ctx, s.Config.CurrentUserName)
+	if err != nil {
+		return fmt.Errorf("Error getting user: %v", err)
+	}
+
+	_, err = s.db.CreateFeed(ctx, database.CreateFeedParams{
+		ID: uuid.New(),
+		UserID: user.ID,
+		Name: feedName,
+		Url: feedURL,
+	})
+	if err != nil {
+		return fmt.Errorf("Error creating feed: %v", err)
+	}
+
 	return nil
 }
