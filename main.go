@@ -72,6 +72,7 @@ func main() {
 	commands.Register("users", handleUsers)
 	commands.Register("agg", handleAgg)
 	commands.Register("addfeed", handleAddFeed)
+	commands.Register("feeds", handleFeeds)
 
 	// Use os.Args to get the command-line arguments passed in by the user.
 	// The first argument is the name of the program, so we skip it.
@@ -246,6 +247,31 @@ func handleAddFeed(s *State, cmd Command) error {
 	})
 	if err != nil {
 		return fmt.Errorf("Error creating feed: %v", err)
+	}
+
+	return nil
+}
+
+func handleFeeds(s *State, cmd Command) error {
+	if len(cmd.Arguments) != 0 {
+		return fmt.Errorf("Feeds doesnt allow commands")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	feeds, err := s.db.GetFeeds(ctx)
+	if err != nil {
+		return fmt.Errorf("Error getting feeds: %v", err)
+	}
+
+	for _, feed := range feeds {
+		user, err := s.db.GetUserById(ctx, feed.UserID)
+		if err != nil {
+			return fmt.Errorf("Error getting user: %v", err)
+		}
+
+		fmt.Printf("* FeedTitle: %s | FeedURL: (%s) | UserName: %s\n", feed.Name, feed.Url, user.Name)
 	}
 
 	return nil
