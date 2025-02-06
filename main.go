@@ -67,6 +67,7 @@ func main() {
 	}
 	commands.Register("login", handlerLogin)
 	commands.Register("register", handlerRegister)
+	commands.Register("reset", handleReset)
 
 	// Use os.Args to get the command-line arguments passed in by the user.
 	// The first argument is the name of the program, so we skip it.
@@ -121,8 +122,10 @@ func handlerRegister(s *State, cmd Command) error {
 		return fmt.Errorf("No command provided")
 	}
 
+	// Get the name of the user from the command arguments.
 	name := cmd.Arguments[0]
 
+	// Create a new user in the database using the CreateUser method from the database package.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -136,14 +139,38 @@ func handlerRegister(s *State, cmd Command) error {
 		return fmt.Errorf("Error creating user: %v", err)
 	}
 
-	// Set the current user in the config
-	s.Config.CurrentUserName = user.Name
+	// Log the user in by calling the handlerLogin function with the user’s name.
+	loginCmd := Command{
+		Name: "login",
+		Arguments: []string{name},
+	}
+	if err := handlerLogin(s, loginCmd); err != nil {
+		return fmt.Errorf("Error logging in user: %v", err)
+	}
 
 	// Print a message that the user was created, and log the user’s data to the console for your own debugging.
 	fmt.Printf("User %s has been created successfully!\n", user.Name)
 	fmt.Printf("User ID: %s\n", user.ID)
 	fmt.Printf("Created At: %s\n", user.CreatedAt)
 	fmt.Printf("Updated At: %s\n", user.UpdatedAt)
+
+	return nil
+}
+
+func handleReset(s *State, cmd Command) error {
+	if len(cmd.Arguments) != 0 {
+		return fmt.Errorf("Reset doesnt allow commands")
+	}
+
+	s.Config.CurrentUserName = ""
+	s.Config.SetUser("")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := s.db.ResetUsers(ctx); err != nil {
+		return fmt.Errorf("Error resetting users: %v", err)
+	}
 
 	return nil
 }
