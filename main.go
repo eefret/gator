@@ -1,15 +1,23 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/eefret/gator/internal/config"
+	"github.com/eefret/gator/internal/database"
+	"github.com/google/uuid"
+
+	_ "github.com/lib/pq"
 )
 
 type State struct {
 	Config *config.Config
+	db *database.Queries
 }
 
 type Command struct {
@@ -41,8 +49,16 @@ func main() {
 		log.Fatalf("Error reading config: %v", err)
 	}
 
+	db, err := sql.Open("postgres", cfg.DbURL)
+	if err != nil {
+		log.Fatalf("Error opening database: %v", err)
+	}
+
+	dbQueries := database.New(db)
+
 	state := &State{
 		Config: cfg,
+		db: dbQueries,
 	}
 
 	// Create a new instance of the commands struct with an initialized map of handler functions.
@@ -50,6 +66,7 @@ func main() {
 		commands: make(map[string]func(*State, Command) error),
 	}
 	commands.Register("login", handlerLogin)
+	commands.Register("register", handlerRegister)
 
 	// Use os.Args to get the command-line arguments passed in by the user.
 	// The first argument is the name of the program, so we skip it.
@@ -77,10 +94,56 @@ func handlerLogin(s *State, cmd Command) error {
 		return fmt.Errorf("No command provided")
 	}
 
-	s.Config.CurrentUserName = cmd.Arguments[0]
-	s.Config.SetUser(s.Config.CurrentUserName)
+	name := cmd.Arguments[0]
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	user, err := s.db.GetUser(ctx, name)
+	if err != nil {
+		return fmt.Errorf("Error getting user: %v", err)
+	}
+
+	if user.Name == "" {
+		return fmt.Errorf("User not found")
+	}
+
+	s.Config.CurrentUserName = name
+	s.Config.SetUser(name)
 
 	fmt.Println("User has been set successfully!")
+
+	return nil
+}
+
+func handlerRegister(s *State, cmd Command) error {
+	if len(cmd.Arguments) == 0 {
+		return fmt.Errorf("No command provided")
+	}
+
+	name := cmd.Arguments[0]
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	user, err := s.db.CreateUser(ctx, database.CreateUserParams{
+		ID:     uuid.New(),
+		Name: 	name,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
+	if err != nil {
+		return fmt.Errorf("Error creating user: %v", err)
+	}
+
+	// Set the current user in the config
+	s.Config.CurrentUserName = user.Name
+
+	// Print a message that the user was created, and log the user’s data to the console for your own debugging.
+	fmt.Printf("User %s has been created successfully!\n", user.Name)
+	fmt.Printf("User ID: %s\n", user.ID)
+	fmt.Printf("Created At: %s\n", user.CreatedAt)
+	fmt.Printf("Updated At: %s\n", user.UpdatedAt)
 
 	return nil
 }
