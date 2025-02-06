@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/eefret/gator/external/rss"
 	"github.com/eefret/gator/internal/config"
 	"github.com/eefret/gator/internal/database"
 	"github.com/google/uuid"
@@ -69,6 +70,7 @@ func main() {
 	commands.Register("register", handlerRegister)
 	commands.Register("reset", handleReset)
 	commands.Register("users", handleUsers)
+	commands.Register("agg", handleAgg)
 
 	// Use os.Args to get the command-line arguments passed in by the user.
 	// The first argument is the name of the program, so we skip it.
@@ -197,5 +199,23 @@ func handleUsers(s *State, cmd Command) error {
 		}
 	}
 
+	return nil
+}
+
+func handleAgg(_ *State, cmd Command) error {
+	if len(cmd.Arguments) != 0 {
+		return fmt.Errorf("Agg doesnt allow commands")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	feed, err := rss.FetchFeed(ctx, "https://www.wagslane.dev/index.xml")
+	if err != nil {
+		return fmt.Errorf("Error fetching feed: %v", err)
+	}
+
+	// Print the entire feed to the console.
+	fmt.Printf("Feed: %+v\n", feed)
 	return nil
 }
