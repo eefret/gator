@@ -68,6 +68,7 @@ func main() {
 	commands.Register("login", handlerLogin)
 	commands.Register("register", handlerRegister)
 	commands.Register("reset", handleReset)
+	commands.Register("users", handleUsers)
 
 	// Use os.Args to get the command-line arguments passed in by the user.
 	// The first argument is the name of the program, so we skip it.
@@ -170,6 +171,30 @@ func handleReset(s *State, cmd Command) error {
 
 	if err := s.db.ResetUsers(ctx); err != nil {
 		return fmt.Errorf("Error resetting users: %v", err)
+	}
+
+	return nil
+}
+
+func handleUsers(s *State, cmd Command) error {
+	if len(cmd.Arguments) != 0 {
+		return fmt.Errorf("Users doesnt allow commands")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	users, err := s.db.GetUsers(ctx)
+	if err != nil {
+		return fmt.Errorf("Error listing users: %v", err)
+	}
+
+	for _, user := range users {
+		if user.Name == s.Config.CurrentUserName {
+			fmt.Printf("* %s (current)\n", user.Name)
+		} else {
+			fmt.Printf("* %s\n", user.Name)
+		}
 	}
 
 	return nil
