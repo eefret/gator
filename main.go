@@ -225,22 +225,31 @@ func handleUsers(s *State, cmd Command) error {
 	return nil
 }
 
-func handleAgg(_ *State, cmd Command) error {
-	if len(cmd.Arguments) != 0 {
-		return fmt.Errorf("Agg doesnt allow commands")
+func handleAgg(s *State, cmd Command) error {
+	if len(cmd.Arguments) != 1 {
+		return fmt.Errorf("Agg just requires one argument")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	feed, err := rss.FetchFeed(ctx, "https://www.wagslane.dev/index.xml")
+	timeBetweenRequests, err := time.ParseDuration(cmd.Arguments[0])
 	if err != nil {
-		return fmt.Errorf("Error fetching feed: %v", err)
+		return fmt.Errorf("Error parsing duration: %v", err)
 	}
 
-	// Print the entire feed to the console.
-	fmt.Printf("Feed: %+v\n", feed)
-	return nil
+	fmt.Println("Collecting feeds every " + timeBetweenRequests.String())
+
+	ticker := time.NewTicker(timeBetweenRequests)
+
+	for ; ; <-ticker.C {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		err := scrapeFeeds(ctx, s.db)
+		cancel()
+
+		if err != nil {
+			fmt.Printf("Error scraping feeds: %v\n", err)
+		}
+
+	}
+
 }
 
 func handleAddFeed(s *State, cmd Command, user database.User) error {
@@ -368,6 +377,29 @@ func handleUnfollow(s *State, cmd Command, user database.User) error {
 	}
 
 	fmt.Printf("%s is no longer following %s\n", user.Name, feedURL)
+
+	return nil
+}
+
+func scrapeFeeds(ctx context.Context, db *database.Queries) error {
+	next, err := db.GetNextFeedToFetch(ctx)
+	if err != nil {
+		return fmt.Errorf("Error getting next feed to fetch: %v", err)
+	}
+
+	err = db.MarkFeedFetched(ctx, next.ID)
+	if err != nil {
+		return fmt.Errorf("Error marking feed fetched: %v", err)
+	}
+
+	feed, err := rss.FetchFeed(ctx, next.Url)
+	if err != nil {
+		return fmt.Errorf("Error fetching feed: %v", err)
+	}
+
+	for _, item := range feed.Channel.Item {
+		fmt.Printf("Title: %s\n", item.Title)
+	}
 
 	return nil
 }
