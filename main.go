@@ -73,6 +73,8 @@ func main() {
 	commands.Register("agg", handleAgg)
 	commands.Register("addfeed", handleAddFeed)
 	commands.Register("feeds", handleFeeds)
+	commands.Register("follow", handleFollow)
+	commands.Register("following", handleFollowing)
 
 	// Use os.Args to get the command-line arguments passed in by the user.
 	// The first argument is the name of the program, so we skip it.
@@ -239,7 +241,7 @@ func handleAddFeed(s *State, cmd Command) error {
 		return fmt.Errorf("Error getting user: %v", err)
 	}
 
-	_, err = s.db.CreateFeed(ctx, database.CreateFeedParams{
+	feed, err := s.db.CreateFeed(ctx, database.CreateFeedParams{
 		ID: uuid.New(),
 		UserID: user.ID,
 		Name: feedName,
@@ -247,6 +249,14 @@ func handleAddFeed(s *State, cmd Command) error {
 	})
 	if err != nil {
 		return fmt.Errorf("Error creating feed: %v", err)
+	}
+
+	_, err = s.db.CreateFeedFollow(ctx, database.CreateFeedFollowParams{
+		UserID: user.ID,
+		FeedID: feed.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("Error following feed: %v", err)
 	}
 
 	return nil
@@ -272,6 +282,64 @@ func handleFeeds(s *State, cmd Command) error {
 		}
 
 		fmt.Printf("* FeedTitle: %s | FeedURL: (%s) | UserName: %s\n", feed.Name, feed.Url, user.Name)
+	}
+
+	return nil
+}
+
+func handleFollow(s *State, cmd Command) error {
+	if len(cmd.Arguments) != 1 {
+		return fmt.Errorf("Follow requires one argument")
+	}
+
+	feedURL := cmd.Arguments[0]
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	user, err := s.db.GetUser(ctx, s.Config.CurrentUserName)
+	if err != nil {
+		return fmt.Errorf("Error getting user: %v", err)
+	}
+
+	feed, err := s.db.GetFeedByURL(ctx, feedURL)
+	if err != nil {
+		return fmt.Errorf("Error getting feed: %v", err)
+	}
+
+	row, err := s.db.CreateFeedFollow(ctx, database.CreateFeedFollowParams{
+		UserID: user.ID,
+		FeedID: feed.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("Error following feed: %v", err)
+	}
+
+	fmt.Printf("%s is now following %s\n", row.UserName, row.FeedName)
+
+	return nil
+}
+
+func handleFollowing(s *State, cmd Command) error {
+	if len(cmd.Arguments) != 0 {
+		return fmt.Errorf("Following doesnt allow commands")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	user, err := s.db.GetUser(ctx, s.Config.CurrentUserName)
+	if err != nil {
+		return fmt.Errorf("Error getting user: %v", err)
+	}
+
+	follows, err := s.db.GetFeedFollowsForUser(ctx, user.ID)
+	if err != nil {
+		return fmt.Errorf("Error getting follows: %v", err)
+	}
+
+	for _, follow := range follows {
+		fmt.Printf("* %s is following %s\n", follow.UserName, follow.FeedName)
 	}
 
 	return nil
