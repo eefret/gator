@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/eefret/gator/external/rss"
@@ -76,6 +77,7 @@ func main() {
 	commands.Register("follow", middlewareLoggedIn(handleFollow))
 	commands.Register("following", middlewareLoggedIn(handleFollowing))
 	commands.Register("unfollow", middlewareLoggedIn(handleUnfollow))
+	commands.Register("browse", middlewareLoggedIn(handleBrowse))
 
 	// Use os.Args to get the command-line arguments passed in by the user.
 	// The first argument is the name of the program, so we skip it.
@@ -381,24 +383,82 @@ func handleUnfollow(s *State, cmd Command, user database.User) error {
 	return nil
 }
 
+func handleBrowse(s *State, cmd Command, user database.User) error {
+	limit := 2
+	if len(cmd.Arguments) == 1 {
+		if specifiedLimit, err := strconv.Atoi(cmd.Arguments[0]); err == nil {
+			limit = specifiedLimit
+		} else {
+			return fmt.Errorf("invalid limit: %w", err)
+		}
+	}
+
+	posts, err := s.db.GetPostsForUser(context.Background(), database.GetPostsForUserParams{
+		UserID: user.ID,
+		Limit:  int32(limit),
+	})
+	if err != nil {
+		return fmt.Errorf("couldn't get posts for user: %w", err)
+	}
+
+	fmt.Printf("Found %d posts for user %s:\n", len(posts), user.Name)
+	for _, post := range posts {
+		fmt.Printf("%s from %s\n", post.PublishedAt.Time.Format("Mon Jan 2"), post.FeedName)
+		fmt.Printf("--- %s ---\n", post.Title)
+		fmt.Printf("    %v\n", post.Description)
+		fmt.Printf("Link: %s\n", post.Url)
+		fmt.Println("=====================================")
+	}
+
+	return nil
+}
+
 func scrapeFeeds(ctx context.Context, db *database.Queries) error {
 	next, err := db.GetNextFeedToFetch(ctx)
 	if err != nil {
 		return fmt.Errorf("Error getting next feed to fetch: %v", err)
 	}
 
-	err = db.MarkFeedFetched(ctx, next.ID)
+	fmt.Println("Found a feed to fetch!")
+
+	return scrapeFeed(ctx, db, next)
+}
+
+
+func scrapeFeed(ctx context.Context, db *database.Queries, feed database.Feed) error {
+	err := db.MarkFeedFetched(ctx, feed.ID)
 	if err != nil {
 		return fmt.Errorf("Error marking feed fetched: %v", err)
 	}
 
-	feed, err := rss.FetchFeed(ctx, next.Url)
+	feedData, err := rss.FetchFeed(ctx, feed.Url)
 	if err != nil {
 		return fmt.Errorf("Error fetching feed: %v", err)
 	}
 
-	for _, item := range feed.Channel.Item {
-		fmt.Printf("Title: %s\n", item.Title)
+	for _, item := range feedData.Channel.Item {
+		publishedAt := sql.NullTime{}
+		if t, err := time.Parse(time.RFC1123Z, item.PubDate); err == nil {
+			publishedAt = sql.NullTime{
+				Time:  t,
+				Valid: true,
+			}
+		}
+
+		_, err = db.CreatePost(context.Background(), database.CreatePostParams{
+			FeedID:    feed.ID,
+			Title:     item.Title,
+			Description: sql.NullString{
+				String: item.Description,
+				Valid:  true,
+			},
+			Url:         item.Link,
+			PublishedAt: publishedAt,
+		})
+
+		if err != nil {
+			return fmt.Errorf("Error creating post: %v", err)
+		}
 	}
 
 	return nil
