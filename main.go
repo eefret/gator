@@ -71,10 +71,11 @@ func main() {
 	commands.Register("reset", handleReset)
 	commands.Register("users", handleUsers)
 	commands.Register("agg", handleAgg)
-	commands.Register("addfeed", handleAddFeed)
+	commands.Register("addfeed", middlewareLoggedIn(handleAddFeed))
 	commands.Register("feeds", handleFeeds)
-	commands.Register("follow", handleFollow)
-	commands.Register("following", handleFollowing)
+	commands.Register("follow", middlewareLoggedIn(handleFollow))
+	commands.Register("following", middlewareLoggedIn(handleFollowing))
+	commands.Register("unfollow", middlewareLoggedIn(handleUnfollow))
 
 	// Use os.Args to get the command-line arguments passed in by the user.
 	// The first argument is the name of the program, so we skip it.
@@ -95,6 +96,24 @@ func main() {
 	}
 
 
+}
+
+func middlewareLoggedIn(handler func(s *State, cmd Command, user database.User) error) func(*State, Command) error {
+	return func(s *State, cmd Command) error {
+		if s.Config.CurrentUserName == "" {
+			return fmt.Errorf("You must be logged in to run this command")
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		user, err := s.db.GetUser(ctx, s.Config.CurrentUserName)
+		if err != nil {
+			return fmt.Errorf("Error getting user: %v", err)
+		}
+
+		return handler(s, cmd, user)
+	}
 }
 
 func handlerLogin(s *State, cmd Command) error {
@@ -224,7 +243,7 @@ func handleAgg(_ *State, cmd Command) error {
 	return nil
 }
 
-func handleAddFeed(s *State, cmd Command) error {
+func handleAddFeed(s *State, cmd Command, user database.User) error {
 	if len(cmd.Arguments) != 2 {
 		return fmt.Errorf(`AddFeed requires name and url arguments. example addfeed "<name>" "<url>"`)
 	}
@@ -235,11 +254,6 @@ func handleAddFeed(s *State, cmd Command) error {
 	// Get current user
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
-	user, err := s.db.GetUser(ctx, s.Config.CurrentUserName)
-	if err != nil {
-		return fmt.Errorf("Error getting user: %v", err)
-	}
 
 	feed, err := s.db.CreateFeed(ctx, database.CreateFeedParams{
 		ID: uuid.New(),
@@ -287,7 +301,7 @@ func handleFeeds(s *State, cmd Command) error {
 	return nil
 }
 
-func handleFollow(s *State, cmd Command) error {
+func handleFollow(s *State, cmd Command, user database.User) error {
 	if len(cmd.Arguments) != 1 {
 		return fmt.Errorf("Follow requires one argument")
 	}
@@ -296,11 +310,6 @@ func handleFollow(s *State, cmd Command) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
-	user, err := s.db.GetUser(ctx, s.Config.CurrentUserName)
-	if err != nil {
-		return fmt.Errorf("Error getting user: %v", err)
-	}
 
 	feed, err := s.db.GetFeedByURL(ctx, feedURL)
 	if err != nil {
@@ -320,18 +329,13 @@ func handleFollow(s *State, cmd Command) error {
 	return nil
 }
 
-func handleFollowing(s *State, cmd Command) error {
+func handleFollowing(s *State, cmd Command, user database.User) error {
 	if len(cmd.Arguments) != 0 {
 		return fmt.Errorf("Following doesnt allow commands")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
-	user, err := s.db.GetUser(ctx, s.Config.CurrentUserName)
-	if err != nil {
-		return fmt.Errorf("Error getting user: %v", err)
-	}
 
 	follows, err := s.db.GetFeedFollowsForUser(ctx, user.ID)
 	if err != nil {
@@ -341,6 +345,29 @@ func handleFollowing(s *State, cmd Command) error {
 	for _, follow := range follows {
 		fmt.Printf("* %s is following %s\n", follow.UserName, follow.FeedName)
 	}
+
+	return nil
+}
+
+func handleUnfollow(s *State, cmd Command, user database.User) error {
+	if len(cmd.Arguments) != 1 {
+		return fmt.Errorf("Unfollow requires one argument")
+	}
+
+	feedURL := cmd.Arguments[0]
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := s.db.DeleteFeedFollow(ctx, database.DeleteFeedFollowParams{
+		UserID: user.ID,
+		Url: feedURL,
+	})
+	if err != nil {
+		return fmt.Errorf("Error unfollowing feed: %v", err)
+	}
+
+	fmt.Printf("%s is no longer following %s\n", user.Name, feedURL)
 
 	return nil
 }
