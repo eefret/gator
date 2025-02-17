@@ -70,6 +70,9 @@ Unfollow a feed by its URL.
 ```bash
 gator unfollow <feed_url>
 ```
+## Contributing
+
+
 For additional command details, you can run:
 
 License MIT
